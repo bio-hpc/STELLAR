@@ -1,0 +1,242 @@
+# ====================================================================
+# WORKFLOW COMPLETO PARA 3R7G_B (7 FRAGMENTOS) - SOLO GN - CON REGISTRO DE TIEMPOS
+# ====================================================================
+# Directorio base: raíz del proyecto
+# Cristal (complejo) para este caso: /gpfs/scratch/ucam37/alejandro/metascreener_stellar/complex/3r7g_B_A.pdb
+# Registro de tiempos: cada paso escribe en TIMING_LOG (real, user, sys y tiempo pared)
+TIMING_LOG="timing_workflow_3R7G_B.log"
+WORKFLOW_START=$(date +%s)
+
+# ============================================
+# PASO 0: Ejecutar Cálculos de Docking en Secuencial
+# ============================================
+# IMPORTANTE: Este paso ejecuta los comandos de docking uno por uno,
+# esperando a que cada trabajo SLURM termine antes de continuar con el siguiente.
+# Solo procesa el complejo 3R7G_B y se detiene después de completarlo.
+# La carpeta Propedia detectada es: Propedia_pdbqt_7Frag
+_s0=$(date +%s)
+/usr/bin/time -p python3 run_propedia_commands_single.py --complex 3R7G_B --propedia-folder Propedia_pdbqt_7Frag --skip-if-exists 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 0: tiempo_pared=$(($(date +%s)-_s0))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 1: Generar CSV con Coordenadas C-N
+# ============================================
+# Para cada fragmento existente (1, 2, 3, 4, 5, 6, 7):
+_s1=$(date +%s)
+python3 STELLAR/save_pose_CN_coordinates.py 3R7G_B_GN/VS_GN_3R7G_B_Frag1/molecules/
+python3 STELLAR/save_pose_CN_coordinates.py 3R7G_B_GN/VS_GN_3R7G_B_Frag2/molecules/
+python3 STELLAR/save_pose_CN_coordinates.py 3R7G_B_GN/VS_GN_3R7G_B_Frag3/molecules/
+python3 STELLAR/save_pose_CN_coordinates.py 3R7G_B_GN/VS_GN_3R7G_B_Frag4/molecules/
+python3 STELLAR/save_pose_CN_coordinates.py 3R7G_B_GN/VS_GN_3R7G_B_Frag5/molecules/
+python3 STELLAR/save_pose_CN_coordinates.py 3R7G_B_GN/VS_GN_3R7G_B_Frag6/molecules/
+python3 STELLAR/save_pose_CN_coordinates.py 3R7G_B_GN/VS_GN_3R7G_B_Frag7/molecules/
+
+# Agregar coordenadas:
+python3 STELLAR/aggregate_gn_pose_coords.py 3R7G_B_GN --case-filter 3R7G_B
+echo "[TIMING] PASO 1: tiempo_pared=$(($(date +%s)-_s1))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 2: Filtrar Combinaciones por Distancia
+# ============================================
+# IMPORTANTE: El primer argumento es la carpeta donde están VS_GN_* (ej. 1JK8_C), no "."
+# Puedes ajustar el umbral con --threshold-gn
+# Valor por defecto: GN=2.0
+_s2=$(date +%s)
+/usr/bin/time -p ./STELLAR/filter_fragment_combinations 3R7G_B_GN VS_GN 3R7G_B --threshold-gn 1.8 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 2: tiempo_pared=$(($(date +%s)-_s2))s" | tee -a "$TIMING_LOG"
+# Con umbral personalizado (si las distancias son grandes):
+# ./STELLAR/filter_fragment_combinations 3R7G_B_GN VS_GN 3R7G_B --threshold-gn 50.0
+
+# ============================================
+# PASO 3: Organizar Combinaciones en Carpetas
+# ============================================
+# IMPORTANTE: El CSV lo escribe filter_fragment_combinations en 3R7G_B_GN/valid_fragment_combinations.csv
+# base_dir para organize debe ser donde están VS_GN_* (3R7G_B_GN), no "."
+_s3=$(date +%s)
+/usr/bin/time -p python3 STELLAR/organize_valid_combinations.py 3R7G_B_GN/valid_fragment_combinations.csv 3R7G_B_GN valid_combinations_GN_3R7G_B GN 3R7G_B 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 3: tiempo_pared=$(($(date +%s)-_s3))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 4: Filtrar por Overlap
+# ============================================
+# IMPORTANTE: El directorio de entrada es valid_combinations_GN_3R7G_B (en la raíz)
+# Si hay más de 100 válidas, conservar solo las 100 con menor overlap (0 = procesar todas; 100 = máx. válidas)
+_s4=$(date +%s)
+/usr/bin/time -p python3 STELLAR/check_overlap_combinations.py valid_combinations_GN_3R7G_B GN 350 0 100 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 4: tiempo_pared=$(($(date +%s)-_s4))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 5: Convertir PDBQT a MOL2 (Solo GN)
+# ============================================
+# IMPORTANTE: El directorio base es valid_combinations_GN_3R7G_B/valid_no_overlap
+_s5=$(date +%s)
+/usr/bin/time -p python3 STELLAR/convert_combinations_pdbqt_to_mol2.py GN --base-dir valid_combinations_GN_3R7G_B/valid_no_overlap 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 5: tiempo_pared=$(($(date +%s)-_s5))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 6: Unir Fragmentos
+# ============================================
+# IMPORTANTE: El directorio base es valid_combinations_GN_3R7G_B/valid_no_overlap
+# NOTA: El script detectará automáticamente la imagen de Singularity (STELLAR.simg) si está disponible
+#       para ejecutar relax_merge_mol2.py que requiere RDKit
+_s6=$(date +%s)
+/usr/bin/time -p python3 STELLAR/merge_all_combinations.py GN --base-dir-gn valid_combinations_GN_3R7G_B/valid_no_overlap 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 6: tiempo_pared=$(($(date +%s)-_s6))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 7: Preparar Estructura Final
+# ============================================
+# ADVERTENCIA: Busca manualmente el archivo PDB del receptor y actualiza la ruta
+# El directorio base es valid_combinations_GN_3R7G_B/valid_no_overlap
+# El directorio de salida se crea en la raíz: valid_GN_3R7G_B_final
+# ADVERTENCIA: No se encontró archivo PDB en Propedia_Final_mol2/3R7G_B/Receptor
+# prepare_final_combinations buscará solo en VS_GN_{case}_Frag1/results/best_scores
+_s7=$(date +%s)
+/usr/bin/time -p python3 STELLAR/prepare_final_combinations.py GN --pdb-file 3r7g_*.pdb --pdb-search-dir 3R7G_B_GN/VS_GN_3R7G_B_Frag1/results/best_scores --base-dir-gn valid_combinations_GN_3R7G_B/valid_no_overlap --output-dir-gn valid_GN_3R7G_B_final 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 7: tiempo_pared=$(($(date +%s)-_s7))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 8: Corregir Cargas en MOL2
+# ============================================
+# Aplicar fix de cargas cero y C.ar con carga < 0.01:
+# IMPORTANTE: El directorio base es valid_GN_3R7G_B_final (en la raíz)
+_s8=$(date +%s)
+/usr/bin/time -p python3 STELLAR/fix_zero_charge_atoms.py GN --base-dir-gn valid_GN_3R7G_B_final --fix-aromatic 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 8: tiempo_pared=$(($(date +%s)-_s8))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 9: Eliminar Calcios de PDBs (comentado: no eliminar calcios antes de generar topologías)
+# ============================================
+# Si los PDBs contienen calcios:
+# IMPORTANTE: El directorio es valid_GN_3R7G_B_final (en la raíz)
+# python3 remove_calcium_from_pdb.py valid_GN_3R7G_B_final
+
+# ============================================
+# PASO 10: Generar Topologías GROMACS
+# ============================================
+# IMPORTANTE: El directorio base es valid_GN_3R7G_B_final (en la raíz)
+_s10=$(date +%s)
+/usr/bin/time -p python3 STELLAR/generate_topologies.py GN --base-dir-gn valid_GN_3R7G_B_final 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 10: tiempo_pared=$(($(date +%s)-_s10))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 11: Lanzar Simulaciones de Dinámica Molecular
+# ============================================
+# IMPORTANTE: Asegúrate de que el script sm.sh esté disponible
+# Puedes pasar parámetros adicionales a sm.sh (ej: -o VS -s GR -n 1000)
+# IMPORTANTE: El directorio base es valid_GN_3R7G_B_final (en la raíz)
+# IMPORTANTE: --sequential (o --wait) hace que se ejecuten uno a uno, esperando a que cada job
+#             de SLURM termine antes de lanzar el siguiente. Esto evita saturar la cola de trabajos.
+#             Similar al comportamiento de run_propedia_commands_single.py
+_s11=$(date +%s)
+/usr/bin/time -p python3 run_md_simulations.py GN --base-dir-gn valid_GN_3R7G_B_final --sequential 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 11: tiempo_pared=$(($(date +%s)-_s11))s" | tee -a "$TIMING_LOG"
+
+# Con parámetros personalizados para sm.sh (también con --sequential):
+# python3 run_md_simulations.py GN --base-dir-gn valid_GN_3R7G_B_final --sequential -o VS -s GR -n 1000
+
+# Para ejecutar sin esperar (todos los jobs a la vez, NO RECOMENDADO):
+# python3 run_md_simulations.py GN --base-dir-gn valid_GN_3R7G_B_final
+
+# ============================================
+# PASO 12: Calcular RMSD de Fragmentos frente al Cristal
+# ============================================
+# IMPORTANTE: El directorio de combinaciones es valid_combinations_GN_3R7G_B/valid_no_overlap (en la raíz)
+# El directorio de cristal se resuelve desde la carpeta del caso (--base-dir 3R7G_B) cuando existe
+_s12=$(date +%s)
+/usr/bin/time -p python3 STELLAR/calculate_rmsd_combinations.py valid_combinations_GN_3R7G_B/valid_no_overlap peptide_pdb_fragments/3R7G_B GN 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 12: tiempo_pared=$(($(date +%s)-_s12))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 13: Calcular RMSD de Péptidos Simulados (MD)
+# ============================================
+# IMPORTANTE: Ejecutar después de que las simulaciones MD estén completadas
+# --case filtra solo dinámicas VS_GR del mismo caso y determina el cristal de referencia
+# Cristal usado para este caso: /gpfs/scratch/ucam37/alejandro/metascreener_stellar/complex/3r7g_B_A.pdb
+# --output-dir por caso evita solapamiento al lanzar varios casos en paralelo (sbatch)
+_s13=$(date +%s)
+/usr/bin/time -p python3 STELLAR/calculate_md_rmsd.py --output-csv resultados_rmsd_md_3R7G_B.csv --case 3R7G_B --output-dir md_rmsd_peptides_3R7G_B 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 13: tiempo_pared=$(($(date +%s)-_s13))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 14: Filtrar Combinaciones Válidas (Opcional)
+# ============================================
+# Este paso genera valid_fragment_combinations_GN_no_overlap_3R7G_B.csv (en la raíz)
+# que puede ser útil para análisis y es necesario para Paso 15c y Paso 16
+# --output-csv por caso evita solapamiento al lanzar varios casos en paralelo (sbatch)
+# IMPORTANTE: --input-csv debe ser el CSV del caso (donde filter_fragment_combinations escribió)
+_s14=$(date +%s)
+/usr/bin/time -p python3 STELLAR/filter_valid_combinations_csv.py GN --combinations-dir valid_combinations_GN_3R7G_B/valid_no_overlap --input-csv 3R7G_B_GN/valid_fragment_combinations.csv --output-csv valid_fragment_combinations_GN_no_overlap_3R7G_B.csv 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 14: tiempo_pared=$(($(date +%s)-_s14))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 15: Calcular Score Only con Gnina
+# ============================================
+# Calcular score_only para cada combinación usando gnina
+# Convierte péptidos y proteínas a PDBQT y ejecuta gnina --score_only
+# --peptides-dir y --output-csv por caso evitan solapamiento al lanzar varios casos en paralelo
+# Se usa Singularity por defecto (--bind /gpfs/)
+_s15=$(date +%s)
+/usr/bin/time -p python3 STELLAR/calculate_score_only.py --peptides-dir md_rmsd_peptides_3R7G_B/extracted_peptides --output-csv score_only_results_3R7G_B.csv --singularity-image singularity/metascreener_22.04.simg --singularity-bind /gpfs/ 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 15: tiempo_pared=$(($(date +%s)-_s15))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 15b: Calcular MM/PBSA por combinación (VS_GR_*)
+# ============================================
+# Requiere: simulaciones MD completas (carpetas VS_GR_* con .gro, .xtc, .ndx)
+_s15b=$(date +%s)
+/usr/bin/time -p python3 STELLAR/calculate_mmpbsa.py --case 3R7G_B --type GN --gr-simg gr.simg --g-mmpbsa-bin ./GROMACS/analyze_results/Simulation_gromacs/analyze_trajectory/extra/g_mmpbsa --output-csv mmpbsa_results_3R7G_B.csv 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 15b: tiempo_pared=$(($(date +%s)-_s15b))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 15c: Contribuciones energéticas por fragmento (JSON en VS_GN_*)
+# ============================================
+# Extrae graph_global_field / graph_global_score de cada pose indicada en las combinaciones
+_s15c=$(date +%s)
+/usr/bin/time -p python3 STELLAR/calculate_fragment_energies.py --case 3R7G_B --type GN --combinations-file valid_fragment_combinations_GN_no_overlap_3R7G_B.csv --output-csv fragment_energies_3R7G_B.csv 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 15c: tiempo_pared=$(($(date +%s)-_s15c))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 16: Generar CSV Final con Todas las Métricas
+# ============================================
+# Este es el paso final que genera all_metrics_GN_3R7G_B.csv
+# Combina: poses, scores, distancias, RMSD de fragmentos, RMSD de MD, score_only, MM/PBSA y energías por fragmento
+# IMPORTANTE: Se usan nombres por caso para permitir lanzar varios casos en paralelo (sbatch)
+_s16=$(date +%s)
+/usr/bin/time -p python3 STELLAR/merge_all_metrics.py --prefix-type GN \
+    --combinations-file valid_fragment_combinations_GN_no_overlap_3R7G_B.csv \
+    --rmsd-fragments-file valid_combinations_GN_3R7G_B/valid_no_overlap/rmsd_results.csv \
+    --md-rmsd-file resultados_rmsd_md_3R7G_B.csv \
+    --score-only-file score_only_results_3R7G_B.csv \
+    --mmpbsa-file mmpbsa_results_3R7G_B.csv \
+    --fragment-energies-file fragment_energies_3R7G_B.csv \
+    --output all_metrics_GN_3R7G_B.csv 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 16: tiempo_pared=$(($(date +%s)-_s16))s" | tee -a "$TIMING_LOG"
+
+# ============================================
+# PASO 17: Organizar Archivos Generados
+# ============================================
+# Mover todos los archivos generados a una carpeta organizada
+# Esto evita que se reemplacen entre diferentes pruebas
+# IMPORTANTE: El directorio de destino se crea en la raíz del proyecto
+_s17=$(date +%s)
+/usr/bin/time -p python3 organize_workflow_results.py 3R7G_B --target-dir 3R7G_B_results 2>&1 | tee -a "$TIMING_LOG"
+echo "[TIMING] PASO 17: tiempo_pared=$(($(date +%s)-_s17))s" | tee -a "$TIMING_LOG"
+
+# Tiempo total del workflow
+WORKFLOW_END=$(date +%s)
+echo "[TIMING] WORKFLOW_TOTAL: tiempo_pared=$((WORKFLOW_END - WORKFLOW_START))s" | tee -a "$TIMING_LOG"
+
+# ====================================================================
+# NOTAS:
+# ====================================================================
+# - Caso: 3R7G_B
+# - Directorio base: raíz del proyecto
+# - Registro de tiempos: cada paso escribe en $TIMING_LOG (real, user, sys y tiempo pared)
+# - Log de tiempos: timing_workflow_3R7G_B.log
+# - Los comandos están configurados solo para GN
+# - Ajusta la tolerancia de overlap (350) si es necesario
+# - Ajusta el umbral de distancia si no encuentras combinaciones
+# - Verifica que existan los archivos de cristal en peptide_pdb_fragments/3R7G_B/
+# - El archivo PDB del receptor debe estar en Propedia_Final_mol2/3R7G_B/Receptor/
+# - Verifica el nombre exacto del archivo PDB del receptor antes del Paso 7
