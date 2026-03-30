@@ -1,0 +1,31 @@
+# Files in STELLAR_github (GN pipeline → all_metrics)
+
+# Entry points (repository root)
+run_propedia_commands_single.py
+run_md_simulations.py
+sm.sh
+
+# Pipeline scripts (STELLAR/)
+STELLAR/save_pose_CN_coordinates.py
+STELLAR/aggregate_gn_pose_coords.py
+STELLAR/organize_valid_combinations.py
+STELLAR/check_overlap_combinations.py
+STELLAR/convert_combinations_pdbqt_to_mol2.py
+STELLAR/merge_all_combinations.py
+STELLAR/prepare_final_combinations.py
+STELLAR/fix_zero_charge_atoms.py
+STELLAR/generate_topologies.py
+STELLAR/calculate_rmsd_combinations.py
+STELLAR/calculate_md_rmsd.py
+STELLAR/filter_valid_combinations_csv.py
+STELLAR/calculate_score_only.py
+STELLAR/calculate_mmpbsa.py
+STELLAR/calculate_fragment_energies.py
+STELLAR/merge_all_metrics.py
+STELLAR/relax_merge_mol2.py
+STELLAR/fix_charge_drift.py
+STELLAR/filter_fragment_combinations
+
+docs/WORKFLOW_GN_timed_reference.txt
+README.md
+DEPENDENCIES.md
