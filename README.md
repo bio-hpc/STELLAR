@@ -1,4 +1,4 @@
-# STELLAR — minimal GN scripts execution
+# STELLAR — minimal GN scripts
 
 This directory contains **only the scripts and utilities** needed to run the STELLAR pipeline in **GN** mode, from Propedia docking through **`all_metrics_*.csv`**.
 
