@@ -1,0 +1,12 @@
+Fragment: Frag3
+Peptide: 1aqd_C
+Sequence: LRG
+Number of residues: 3
+Center of mass (x, y, z): 7.516522, 27.644043, 41.264913
+Bounding box (gx, gy, gz): 7.534000, 7.011000, 9.399000
+Box size (max): 9.399000
+Library source: peptides_library\pdbqt\tripeptides\LRG.pdbqt
+PDBQT file: Propedia_Final_pdbqt\1AQD_C\Fragments\Fragmento3\1aqd_C_Frag3.pdbqt
+
+Command:
+./ms.sh -o VS -s GN -t Propedia_Final_pdbqt/1AQD_C/Receptor/1AQD_C_preprocessed.pdbqt -q Propedia_Final_pdbqt/1AQD_C/Fragments/Fragmento3/ -j 1 -x 7.517 -y 27.644 -z 41.265 -hi y -nc 200 -qu ladon -d VS_GN_1AQD_C_Frag3 -gx 9.4 -gy 9.4 -gz 9.4 -mm 20G -mhi 20G -tj 24:00:00

@@ -1,0 +1,12 @@
+Fragment: Frag2
+Peptide: 1aqd_C
+Sequence: WRF
+Number of residues: 3
+Center of mass (x, y, z): -0.952472, 22.694139, 41.315278
+Bounding box (gx, gy, gz): 9.962000, 11.874000, 9.516000
+Box size (max): 11.874000
+Library source: peptides_library\pdbqt\tripeptides\WRF.pdbqt
+PDBQT file: Propedia_Final_pdbqt\1AQD_C\Fragments\Fragmento2\1aqd_C_Frag2.pdbqt
+
+Command:
+./ms.sh -o VS -s GN -t Propedia_Final_pdbqt/1AQD_C/Receptor/1AQD_C_preprocessed.pdbqt -q Propedia_Final_pdbqt/1AQD_C/Fragments/Fragmento2/ -j 1 -x -0.952 -y 22.694 -z 41.315 -hi y -nc 200 -qu ladon -d VS_GN_1AQD_C_Frag2 -gx 11.9 -gy 11.9 -gz 11.9 -mm 20G -mhi 20G -tj 24:00:00

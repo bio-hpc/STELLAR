@@ -111,7 +111,7 @@ def merge_fragments(combo_dir, output_file, dry_run=False, singularity_img=None)
     Returns:
         True on success.
     """
-    script_path = os.path.abspath("relax_merge_mol2.py")
+    script_path = str(_STELLAR_DIR / "relax_merge_mol2.py")
     combo_dir_abs = os.path.abspath(combo_dir)
     output_abs = os.path.abspath(output_file)
     

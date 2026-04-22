@@ -14,6 +14,17 @@ fecha=$(date +"%Y-%m-%d")
 pathSL="GROMACS/login_node/"
 path_gromacs="${PWD}/GROMACS/"
 
+# When launched outside legacy ShuttleMol layout, ensure core paths exist.
+if [ -z "${path_shuttlemol}" ]; then
+	path_shuttlemol="${path_gromacs}"
+fi
+if [ -z "${path_login_node}" ]; then
+	path_login_node="${path_gromacs}login_node/"
+fi
+if [ -z "${path_cluster_nodes}" ]; then
+	path_cluster_nodes="${path_gromacs}cluster_nodes/"
+fi
+
 function f_help(){
 	source ${pathSL}help.sh $1
 	if [ ! -z "$txtErrror" ];then 

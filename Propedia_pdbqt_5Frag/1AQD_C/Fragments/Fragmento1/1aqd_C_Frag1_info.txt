@@ -1,0 +1,12 @@
+Fragment: Frag1
+Peptide: 1aqd_C
+Sequence: GSD
+Number of residues: 3
+Center of mass (x, y, z): -8.729389, 22.270278, 41.311056
+Bounding box (gx, gy, gz): 5.909000, 6.890000, 5.679000
+Box size (max): 6.890000
+Library source: peptides_library\pdbqt\tripeptides\GSD.pdbqt
+PDBQT file: Propedia_Final_pdbqt\1AQD_C\Fragments\Fragmento1\1aqd_C_Frag1.pdbqt
+
+Command:
+./ms.sh -o VS -s GN -t Propedia_Final_pdbqt/1AQD_C/Receptor/1AQD_C_preprocessed.pdbqt -q Propedia_Final_pdbqt/1AQD_C/Fragments/Fragmento1/ -j 1 -x -8.729 -y 22.270 -z 41.311 -hi y -nc 200 -qu ladon -d VS_GN_1AQD_C_Frag1 -gx 6.9 -gy 6.9 -gz 6.9 -mm 20G -mhi 20G -tj 24:00:00

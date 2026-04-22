@@ -11,7 +11,7 @@ import sys
 import tempfile
 from collections import Counter
 
-def calculate_rmsd(reference_file, query_file, singularity_image="new_ms.simg"):
+def calculate_rmsd(reference_file, query_file, singularity_image="singularity/new_ms.simg"):
     """
     Compute RMSD with obrms inside Singularity.
 
@@ -54,7 +54,7 @@ def calculate_rmsd(reference_file, query_file, singularity_image="new_ms.simg"):
         print(f"  Unexpected error: {e}")
         return None
 
-def process_combinations(combinations_dir, crystal_dir, output_csv, prefix_type="GN", singularity_image="new_ms.simg"):
+def process_combinations(combinations_dir, crystal_dir, output_csv, prefix_type="GN", singularity_image="singularity/new_ms.simg"):
     """
     Process all combinations and compute RMSD per fragment.
     Runs all obrms calls in a single Singularity session.
@@ -244,6 +244,7 @@ def process_combinations(combinations_dir, crystal_dir, output_csv, prefix_type=
 def main():
     # Optional --base-dir: project root containing docking and crystal data
     base_dir = None
+    singularity_image = "singularity/new_ms.simg"
     pos_args = []
     i = 1
     while i < len(sys.argv):
@@ -251,15 +252,20 @@ def main():
             base_dir = sys.argv[i + 1]
             i += 2
             continue
+        if sys.argv[i] == "--singularity-image" and i + 1 < len(sys.argv):
+            singularity_image = sys.argv[i + 1]
+            i += 2
+            continue
         pos_args.append(sys.argv[i])
         i += 1
 
     if len(pos_args) < 2:
-        print("Usage: python STELLAR/calculate_rmsd_combinations.py <combinations_dir> <crystal_dir> [prefix_type] [--base-dir DIR]")
+        print("Usage: python STELLAR/calculate_rmsd_combinations.py <combinations_dir> <crystal_dir> [prefix_type] [--base-dir DIR] [--singularity-image IMG]")
         print("  combinations_dir: e.g. valid_combinations_GN/valid_no_overlap")
         print("  crystal_dir: e.g. peptide_pdb_fragments/1A1M_C")
         print("  prefix_type: 'GN' or 'LF' (default: GN)")
         print("  --base-dir: project root with docking and crystal data (e.g. STELLAR_4Frag)")
+        print("  --singularity-image: image path (default: singularity/new_ms.simg)")
         sys.exit(1)
 
     combinations_dir = pos_args[0]
@@ -281,10 +287,14 @@ def main():
                 print(f"Using crystal directory from base_dir: {crystal_dir}")
                 break
 
-    singularity_image = "new_ms.simg"
     if not os.path.exists(singularity_image):
-        print(f"Error: Singularity image not found: {singularity_image}")
-        sys.exit(1)
+        legacy_image = "new_ms.simg"
+        if os.path.exists(legacy_image):
+            print(f"Using legacy image path: {legacy_image}")
+            singularity_image = legacy_image
+        else:
+            print(f"Error: Singularity image not found: {singularity_image}")
+            sys.exit(1)
 
     output_csv = os.path.join(combinations_dir, "rmsd_results.csv")
 

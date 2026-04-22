@@ -3,7 +3,7 @@
 Generate GROMACS topologies for all valid fragment combinations.
 
 Runs:
-singularity exec gr.simg python GROMACS/external_sw/gromacs/topology/generate_topology.py \
+singularity exec singularity/gr.simg python GROMACS/external_sw/gromacs/topology/generate_topology.py \
     -t {combination_dir}/1a1m_A.pdb \
     -q {combination_dir}/query_combination_{num}/
 """
@@ -55,14 +55,14 @@ def all_combinations_have_valid_topology(base_dir):
     return with_topology == len(combo_dirs), len(combo_dirs), with_topology
 
 
-def generate_topology(combo_dir, prefix_type, singularity_image="gr.simg", dry_run=False):
+def generate_topology(combo_dir, prefix_type, singularity_image="singularity/gr.simg", dry_run=False):
     """
     Generate topology for one combination.
 
     Args:
         combo_dir: Combination directory (e.g. valid_GN_final/combination_102)
         prefix_type: 'GN' or 'LF'
-        singularity_image: Singularity image (default: gr.simg)
+        singularity_image: Singularity image (default: singularity/gr.simg)
         dry_run: If True, only print the command
 
     Returns:
@@ -102,7 +102,11 @@ def generate_topology(combo_dir, prefix_type, singularity_image="gr.simg", dry_r
         return False, f"Query directory not found: {query_dir}"
 
     if not os.path.exists(singularity_image) and not dry_run:
-        return False, f"Singularity image not found: {singularity_image}"
+        legacy_image = "gr.simg"
+        if os.path.exists(legacy_image):
+            singularity_image = legacy_image
+        else:
+            return False, f"Singularity image not found: {singularity_image} (or legacy {legacy_image})"
 
     script_path = "GROMACS/external_sw/gromacs/topology/generate_topology.py"
     current_dir = os.getcwd()
@@ -135,7 +139,18 @@ def generate_topology(combo_dir, prefix_type, singularity_image="gr.simg", dry_r
         )
 
         if result.returncode == 0:
-            return True, None
+            if query_combination_has_valid_topology(combo_dir):
+                return True, None
+            details = []
+            if result.stdout:
+                details.append("stdout:\n" + "\n".join(result.stdout.strip().split('\n')[-8:]))
+            if result.stderr:
+                details.append("stderr:\n" + "\n".join(result.stderr.strip().split('\n')[-8:]))
+            details_msg = "\n".join(details) if details else "No output produced by topology generator."
+            return False, (
+                "Topology command exited 0 but did not create query_combination "
+                "files (*complex.top + *query.itp).\n" + details_msg
+            )
         else:
             error_msg = result.stderr.strip() if result.stderr else result.stdout.strip()
             if error_msg:
@@ -165,7 +180,7 @@ def count_expected_topology_files(base_dir):
     return count_with_top, len(combo_dirs)
 
 
-def process_all_combinations(base_dir, prefix_type, singularity_image="gr.simg", dry_run=False, max_combinations=None):
+def process_all_combinations(base_dir, prefix_type, singularity_image="singularity/gr.simg", dry_run=False, max_combinations=None):
     """
     Process all combinations under base_dir.
 
@@ -244,8 +259,8 @@ def main():
     )
     parser.add_argument(
         '--singularity-image',
-        default='gr.simg',
-        help='Singularity image (default: gr.simg)'
+        default='singularity/gr.simg',
+        help='Singularity image (default: singularity/gr.simg)'
     )
     parser.add_argument(
         '--dry-run',

@@ -152,6 +152,23 @@ def has_pdb_in_molecules(vs_folder):
     return len(pdb_files) > 0
 
 
+def has_mmpbsa_required_inputs(vs_folder):
+    """
+    Check whether a VS_GR folder has the core files used by calculate_mmpbsa.py.
+
+    Required:
+    - grids/*_md.mdp
+    - molecules/*_complex*.gro
+    - molecules/*.top
+    - molecules/*_complex_md.xtc
+    """
+    mdp = glob.glob(os.path.join(vs_folder, "grids", "*_md.mdp"))
+    gro = glob.glob(os.path.join(vs_folder, "molecules", "*_complex*.gro"))
+    top = glob.glob(os.path.join(vs_folder, "molecules", "*.top"))
+    xtc = glob.glob(os.path.join(vs_folder, "molecules", "*_complex_md.xtc"))
+    return bool(mdp and gro and top and xtc)
+
+
 def check_existing_pdb(combo_dir, prefix_type, debug=False):
     """
     Whether this combination already has output PDBs under VS_*.
@@ -670,7 +687,9 @@ def run_simulation(combo_dir, prefix_type, sm_script="./sm.sh", dry_run=False, c
             if wait_for_completion:
                 if user is None:
                     user = getpass.getuser()
+                launched_jobs = False
                 if job_ids_from_output:
+                    launched_jobs = True
                     completed_ok = wait_for_all_jobs(job_ids_from_output, user, check_interval, timeout_seconds=job_timeout_seconds)
                     if not completed_ok:
                         print(f"  ⏱️  Run cancelled by time limit; continuing.", flush=True)
@@ -679,17 +698,29 @@ def run_simulation(combo_dir, prefix_type, sm_script="./sm.sh", dry_run=False, c
                     after_jobs = get_current_job_ids(user)
                     new_jobs = find_new_jobs(before_jobs, after_jobs)
                     if new_jobs:
+                        launched_jobs = True
                         completed_ok = wait_for_all_jobs(new_jobs, user, check_interval, timeout_seconds=job_timeout_seconds)
                         if not completed_ok:
                             print(f"  ⏱️  Run cancelled by time limit; continuing.", flush=True)
                     else:
-                        print("  No SLURM jobs detected, command completed.", flush=True)
+                        print("  No SLURM jobs detected after sm.sh execution.", flush=True)
                 # After first MD step: topology error in jobs_out/0-1.err?
                 vs_folders = find_vs_folders(combo_dir, prefix_type, debug=False)
+                if not launched_jobs and not vs_folders:
+                    preview = '\n'.join(err_lines) if err_lines else "No sm.sh output captured."
+                    return False, (
+                        "sm.sh finished without submitting SLURM jobs and no VS_GR folder was detected.\n"
+                        f"Last output lines:\n{preview}"
+                    ), False
                 for vf in vs_folders:
                     has_err, err_msg = check_topology_error_in_first_job(vf)
                     if has_err:
                         return False, err_msg, False
+                if vs_folders and not any(has_mmpbsa_required_inputs(vf) for vf in vs_folders):
+                    return False, (
+                        "MD outputs are incomplete in VS_GR folder(s): missing mdp/gro/top/xtc "
+                        "required for MM/PBSA."
+                    ), False
             return True, None, False
         else:
             error_preview = '\n'.join(err_lines) if err_lines else f"Exit code {result.returncode}"

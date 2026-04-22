@@ -1,0 +1,12 @@
+Fragment: Frag4
+Peptide: 1aqd_C
+Sequence: YHQ
+Number of residues: 3
+Center of mass (x, y, z): 15.731710, 31.197194, 42.040065
+Bounding box (gx, gy, gz): 12.581000, 6.912000, 10.171000
+Box size (max): 12.581000
+Library source: peptides_library\pdbqt\tripeptides\YHQ.pdbqt
+PDBQT file: Propedia_Final_pdbqt\1AQD_C\Fragments\Fragmento4\1aqd_C_Frag4.pdbqt
+
+Command:
+./ms.sh -o VS -s GN -t Propedia_Final_pdbqt/1AQD_C/Receptor/1AQD_C_preprocessed.pdbqt -q Propedia_Final_pdbqt/1AQD_C/Fragments/Fragmento4/ -j 1 -x 15.732 -y 31.197 -z 42.040 -hi y -nc 200 -qu ladon -d VS_GN_1AQD_C_Frag4 -gx 12.6 -gy 12.6 -gz 12.6 -mm 20G -mhi 20G -tj 24:00:00

@@ -269,7 +269,7 @@ def find_crystal_structure(crystal_base_dir, combo_dir=None, project_root=".", c
     return None, None
 
 
-def extract_peptide_with_pymol(simulation_file, crystal_file, output_peptide_sim, output_peptide_crystal, output_protein_sim=None, singularity_image="new_ms.simg", peptide_chain="D", force_peptide_chain=False):
+def extract_peptide_with_pymol(simulation_file, crystal_file, output_peptide_sim, output_peptide_crystal, output_protein_sim=None, singularity_image="singularity/new_ms.simg", peptide_chain="D", force_peptide_chain=False):
     """
     Use PyMOL to align crystal to simulation and extract peptide and receptor.
 
@@ -654,7 +654,7 @@ def calculate_rmsd_peptide_obrms_atoms(peptide_crystal_pdb, peptide_sim_pdb, out
     return _calculate_rmsd_pymol_selector(peptide_crystal_pdb, peptide_sim_pdb, singularity_image, selector)
 
 
-def calculate_rmsd_obrms(reference_file, query_file, singularity_image="new_ms.simg"):
+def calculate_rmsd_obrms(reference_file, query_file, singularity_image="singularity/new_ms.simg"):
     """
     RMSD with obrms.
 
@@ -719,7 +719,7 @@ def calculate_rmsd_obrms(reference_file, query_file, singularity_image="new_ms.s
         return None
 
 
-def process_simulation(vs_folder, crystal_file, output_dir, combo_dir=None, singularity_image="new_ms.simg", dry_run=False, case_override=None, chain_override=None, peptide_rmsd_atoms="heavy"):
+def process_simulation(vs_folder, crystal_file, output_dir, combo_dir=None, singularity_image="singularity/new_ms.simg", dry_run=False, case_override=None, chain_override=None, peptide_rmsd_atoms="heavy"):
     """
     Process one MD run: extract peptides, align, compute RMSD.
 
@@ -846,8 +846,8 @@ def main():
     )
     parser.add_argument(
         '--singularity-image',
-        default='new_ms.simg',
-        help='Singularity image (default: new_ms.simg)'
+        default='singularity/new_ms.simg',
+        help='Singularity image (default: singularity/new_ms.simg)'
     )
     parser.add_argument(
         '--dry-run',
@@ -884,6 +884,11 @@ def main():
     )
 
     args = parser.parse_args()
+    if not os.path.exists(args.singularity_image):
+        legacy_image = "new_ms.simg"
+        if os.path.exists(legacy_image):
+            print(f"ℹ Using legacy image path: {legacy_image}")
+            args.singularity_image = legacy_image
 
     print("=" * 70)
     print("MD peptide RMSD vs crystal")

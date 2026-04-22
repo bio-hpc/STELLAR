@@ -490,6 +490,40 @@ def normalize_command(raw_command: str) -> Tuple[str, Optional[str]]:
     return shlex.join(tokens), output_dir
 
 
+def output_dir_has_reusable_results(output_path: Path) -> bool:
+    """
+    Return True if an existing output directory appears to contain usable docking results.
+
+    Heuristics:
+    - results/best_scores contains at least one file, or
+    - molecules contains at least one file, or
+    - common summary artifacts exist (e.g. Results_scoring.csv, Resume_*.txt).
+    """
+    if not output_path.exists() or not output_path.is_dir():
+        return False
+
+    best_scores = output_path / "results" / "best_scores"
+    if best_scores.is_dir() and any(f.is_file() for f in best_scores.iterdir()):
+        return True
+
+    molecules = output_path / "molecules"
+    if molecules.is_dir() and any(f.is_file() for f in molecules.iterdir()):
+        return True
+
+    summary_candidates = [
+        output_path / "Results_scoring.csv",
+        output_path / "time.txt",
+        output_path / "README.txt",
+    ]
+    if any(p.is_file() for p in summary_candidates):
+        return True
+
+    if any(p.is_file() and p.name.startswith("Resume_") and p.suffix == ".txt" for p in output_path.iterdir()):
+        return True
+
+    return False
+
+
 def _get_fragment_numbers_from_command_file(command_file: Path) -> list[int]:
     """Extract fragment numbers from -d output dirs in the command file (e.g. VS_GN_1BXP_B_Frag3 -> 3)."""
     frag_numbers = []
@@ -664,8 +698,16 @@ def main() -> int:
             if output_dir:
                 output_path = REPO_ROOT / output_dir
                 if output_path.exists():
+                    if output_dir_has_reusable_results(output_path):
+                        print(
+                            f"Output directory `{output_dir}` already exists and looks valid. "
+                            "Reusing it and skipping this command.",
+                            flush=True,
+                        )
+                        continue
+
                     print(
-                        f"Output directory `{output_dir}` already exists. Removing it...",
+                        f"Output directory `{output_dir}` already exists but looks incomplete. Removing it...",
                         flush=True,
                     )
                     try:

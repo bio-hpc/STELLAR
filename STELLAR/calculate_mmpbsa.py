@@ -4,7 +4,7 @@ Compute MM/PBSA-style energies (van der Waals, electrostatic, total) from MD
 trajectories and write one combined CSV.
 
 Per combination folder:
-1. Run grompp (in gr.simg) to build the .tpr
+1. Run grompp (in singularity/gr.simg) to build the .tpr
 2. Run g_mmpbsa (local binary) to produce the MM .xvg
 3. Parse the .xvg and average columns:
    - Protein-L01 VdW Energy
@@ -49,6 +49,17 @@ def find_first(pattern: str) -> Optional[str]:
     """First sorted glob match or None."""
     matches = sorted(glob.glob(pattern))
     return matches[0] if matches else None
+
+
+def folder_has_mmpbsa_inputs(abs_folder: str) -> bool:
+    """Return True if a VS_GR folder has the minimum inputs for MM/PBSA."""
+    mdp = find_first(os.path.join(abs_folder, "grids", "*_md.mdp"))
+    gro = find_first(os.path.join(abs_folder, "molecules", "*_complex_md.gro")) or find_first(
+        os.path.join(abs_folder, "molecules", "*_complex*.gro")
+    )
+    top = find_first(os.path.join(abs_folder, "molecules", "*.top"))
+    xtc = find_first(os.path.join(abs_folder, "molecules", "*_complex_md.xtc"))
+    return all([mdp, gro, top, xtc])
 
 
 def parse_mm_xvg(xvg_file: str) -> Dict[str, Optional[float]]:
@@ -281,7 +292,7 @@ def main():
     parser.add_argument("--case", help="Case (e.g. 1CJR_A) to filter folders", default=None)
     parser.add_argument("--type", choices=["GN", "LF", "all"], default="all", help="Filter by GN/LF")
     parser.add_argument("--base-pattern", default="VS_GR_*", help="Glob for VS_GR folders")
-    parser.add_argument("--gr-simg", default="gr.simg", help="Singularity image with GROMACS")
+    parser.add_argument("--gr-simg", default="singularity/gr.simg", help="Singularity image with GROMACS")
     parser.add_argument("--g-mmpbsa-bin",
                         default="./GROMACS/analyze_results/Simulation_gromacs/analyze_trajectory/extra/g_mmpbsa",
                         help="Path to g_mmpbsa binary")
@@ -289,6 +300,13 @@ def main():
     parser.add_argument("--output-csv", default="mmpbsa_results.csv", help="Output CSV path")
     parser.add_argument("--force", action="store_true", help="Recompute even if outputs exist")
     args = parser.parse_args()
+
+    # Backward compatibility: accept legacy image at repository root.
+    if not os.path.exists(args.gr_simg):
+        legacy_gr = "gr.simg"
+        if os.path.exists(legacy_gr):
+            print(f"ℹ Using legacy GROMACS image path: {legacy_gr}")
+            args.gr_simg = legacy_gr
 
     # Find VS_GR_* folders
     pattern = args.base_pattern
@@ -329,8 +347,14 @@ def main():
 
     results = []
     errors = 0
+    skipped_incomplete = 0
     base_dir = os.getcwd()
     for folder in sorted(folders):
+        abs_folder = os.path.abspath(folder)
+        if not folder_has_mmpbsa_inputs(abs_folder):
+            skipped_incomplete += 1
+            print(f"⊘ Skipping incomplete MD folder: {folder}")
+            continue
         try:
             res = process_folder(folder, args.gr_simg, args.g_mmpbsa_bin, args.maxwarn, args.force, base_dir)
             results.append(res)
@@ -351,6 +375,8 @@ def main():
         print(f"\n✓ Wrote CSV: {args.output_csv} ({len(results)} rows)")
     else:
         print("\n⚠ No CSV written (no successful results).")
+    if skipped_incomplete:
+        print(f"ℹ Skipped incomplete folders: {skipped_incomplete}")
 
     if errors:
         print(f"\n⚠ Errors in {errors} folder(s). Check stderr above.")

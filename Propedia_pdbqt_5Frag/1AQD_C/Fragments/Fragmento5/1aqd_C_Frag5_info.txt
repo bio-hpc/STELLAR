@@ -1,0 +1,12 @@
+Fragment: Frag5
+Peptide: 1aqd_C
+Sequence: YA
+Number of residues: 2
+Center of mass (x, y, z): 24.429437, 34.312375, 43.075250
+Bounding box (gx, gy, gz): 5.714000, 4.235000, 6.906000
+Box size (max): 6.906000
+Library source: peptides_library\pdbqt\dipeptides\YA.pdbqt
+PDBQT file: Propedia_Final_pdbqt\1AQD_C\Fragments\Fragmento5\1aqd_C_Frag5.pdbqt
+
+Command:
+./ms.sh -o VS -s GN -t Propedia_Final_pdbqt/1AQD_C/Receptor/1AQD_C_preprocessed.pdbqt -q Propedia_Final_pdbqt/1AQD_C/Fragments/Fragmento5/ -j 1 -x 24.429 -y 34.312 -z 43.075 -hi y -nc 200 -qu ladon -d VS_GN_1AQD_C_Frag5 -gx 6.9 -gy 6.9 -gz 6.9 -mm 20G -mhi 20G -tj 24:00:00
