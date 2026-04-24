@@ -30,8 +30,6 @@ These calculations are prepared to run on the **BSC supercomputer environment**.
 
 ### Usage instructions
 
-## Run End-to-End (job script -> final CSV)
-
 Use this flow to generate a case-specific SLURM workflow and run it through final metrics.
 
 Before running, ensure your project root includes:
