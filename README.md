@@ -3,7 +3,18 @@
 [![DOI](https://img.shields.io/badge/DOI-10.26434%2Fchemrxiv--2025--nmn5s%2Fv2-blue)](https://doi.org/10.26434/chemrxiv-2025-nmn5s/v2)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.19204099-blue)](https://doi.org/10.5281/zenodo.19204099)
 
-STELLAR is a workflow that enables robust docking of large ligands, such as peptides and polysaccharides, using a fragment-based approach, and subsequently computes a range of metrics to assess the accuracy of the method
+STELLAR is a workflow that enables robust docking of large ligands, such as peptides and polysaccharides, using a fragment-based approach, and subsequently computes a range of metrics to assess the accuracy of the method.
+
+STELLAR is organized in three main stages:
+
+1. **Fragmentation and library generation**  
+   The input polymer (e.g., peptide or saccharide) is split into smaller units, and fragment libraries are prepared (di-/tripeptides, di-/trisaccharides).
+
+2. **Fragment docking with GNINA**  
+   Each fragment is docked independently using GNINA under multiple parameter combinations to sample the docking space and generate a conformation pool per fragment.
+
+3. **Pose reconstruction and refinement**  
+   Fragment poses are filtered and recombined into valid full-polymer conformations. Final candidates are post-processed with short GROMACS MD relaxations to produce final poses and analysis metrics.
 
 ![STELLAR is a workflow that enables robust docking of large ligands, such as peptides and polysaccharides, using a fragment-based approach, and subsequently computes a range of metrics to assess the accuracy of the method](docs/FIGURE.png)
 
