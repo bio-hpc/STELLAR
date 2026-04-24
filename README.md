@@ -3,6 +3,7 @@
 [![DOI](https://img.shields.io/badge/DOI-10.26434%2Fchemrxiv--2025--nmn5s%2Fv2-blue)](https://doi.org/10.26434/chemrxiv-2025-nmn5s/v2)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.19204099-blue)](https://doi.org/10.5281/zenodo.19204099)
 
+STELLAR is a workflow that enables robust docking of large ligands, such as peptides and polysaccharides, using a fragment-based approach, and subsequently computes a range of metrics to assess the accuracy of the method
 
 ![STELLAR is a workflow that enables robust docking of large ligands, such as peptides and polysaccharides, using a fragment-based approach, and subsequently computes a range of metrics to assess the accuracy of the method](docs/FIGURE.png)
 
