@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Runtime / local cluster artifacts
+.singularity_tmp/
+VS_GR_*/
+*_results/
+output_*.out
+output_*.err
+md_rmsd_peptides*/
+resultados_rmsd_md_*.csv
+mmpbsa_results_*.csv
+score_only_results_*.csv
+all_metrics_GN_*.csv
+valid_GN_*_final/
+valid_combinations_GN_*/
+valid_fragment_combinations_GN_*.csv
+
+# Case symlinks and local GN folders at repo root
+*_GN
+*_LF
+
+# Editor / backup
+*#
+.#*
+*.swp
+
+# Large bundled assets (fetch with ./fetch_assets.sh)
+GROMACS/singularity/
+GROMACS/external_sw/amber14/
+GROMACS/external_sw/mgltools/
+GROMACS/external_sw/ligandScout/
+GROMACS/external_sw/rocs/
+GROMACS/external_sw/ChemAxon/
+GROMACS/external_sw/posit/
+GROMACS/external_sw/omega/
+GROMACS/external_sw/xtb/
+GROMACS/external_sw/szMap/
+GROMACS/external_sw/oedocking/
+GROMACS/external_sw/jre/
+GROMACS/external_sw/eon/
+GROMACS/external_sw/OptiPharm/
+GROMACS/external_sw/poseview/
+GROMACS/external_sw/tools/
+MetaScreener/
+ShuttleMol/
+singularity/
+
+# Generated per-case launchers (regenerate with generate_workflow_job.py)
+job_workflow_*.sh
+run_md_step_*.sh

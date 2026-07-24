@@ -15,6 +15,12 @@ import sys
 import argparse
 from pathlib import Path
 
+_TOPOLOGY_DIR = Path(__file__).resolve().parents[1] / "GROMACS" / "external_sw" / "gromacs" / "topology"
+sys.path.insert(0, str(_TOPOLOGY_DIR))
+
+from sanitize_target_pdb import sanitize_target_pdb
+from fix_gro_zero_coords import fix_gro_zero_coords, find_zero_coord_atoms
+
 
 def query_combination_has_valid_topology(combo_dir):
     """
@@ -98,6 +104,11 @@ def generate_topology(combo_dir, prefix_type, singularity_image="singularity/gr.
     if not os.path.exists(pdb_file):
         return False, f"PDB file not found: {pdb_file}"
 
+    try:
+        sanitize_target_pdb(pdb_file, in_place=True)
+    except ValueError as exc:
+        return False, str(exc)
+
     if not os.path.exists(query_dir):
         return False, f"Query directory not found: {query_dir}"
 
@@ -140,6 +151,19 @@ def generate_topology(combo_dir, prefix_type, singularity_image="singularity/gr.
 
         if result.returncode == 0:
             if query_combination_has_valid_topology(combo_dir):
+                gro_files = glob.glob(
+                    os.path.join(query_dir, "*_complex.gro")
+                )
+                repaired = 0
+                for gro_path in gro_files:
+                    try:
+                        n = fix_gro_zero_coords(gro_path)
+                        if n:
+                            repaired += n
+                    except ValueError as exc:
+                        return False, str(exc)
+                if repaired:
+                    print(f"  Repaired {repaired} zero-coordinate atom(s) in {combo_name}")
                 return True, None
             details = []
             if result.stdout:
@@ -219,7 +243,24 @@ def process_all_combinations(base_dir, prefix_type, singularity_image="singulari
 
         if query_combination_has_valid_topology(combo_dir):
             if not dry_run:
-                print(f"  ✓ Valid topology already present (complex.top + query.itp); skipping.")
+                combo_number = combo_name.replace("combination_", "")
+                query_dir = os.path.join(combo_dir, f"query_combination_{combo_number}")
+                gro_files = glob.glob(os.path.join(query_dir, "*_complex.gro"))
+                repaired = 0
+                for gro_path in gro_files:
+                    try:
+                        n = fix_gro_zero_coords(gro_path)
+                        if n:
+                            repaired += n
+                    except ValueError as exc:
+                        total_errors += 1
+                        errors_list.append((combo_name, str(exc)))
+                        print(f"  ✗ {exc}")
+                        continue
+                if repaired:
+                    print(f"  ✓ Repaired {repaired} zero-coordinate atom(s)")
+                else:
+                    print(f"  ✓ Valid topology already present (complex.top + query.itp); skipping.")
             total_processed += 1
             continue
 

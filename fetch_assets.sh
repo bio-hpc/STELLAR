@@ -109,3 +109,8 @@ done
 shopt -u dotglob nullglob
 
 echo "Assets deployed successfully."
+
+if [ -x "${ROOT_DIR}/GROMACS/apply_gromacs_overlays.sh" ]; then
+  echo "Applying local GROMACS overlays..."
+  "${ROOT_DIR}/GROMACS/apply_gromacs_overlays.sh"
+fi

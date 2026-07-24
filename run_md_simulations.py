@@ -39,33 +39,23 @@ def find_vs_folders(combo_dir, prefix_type, debug=False):
     # VS_GR_* at project root; match combo id exactly (avoid 1 matching 10)
     project_root = os.getcwd()
     
-    # Infer case id from parent dir: valid_{TYPE}_final_{CASE} or valid_{TYPE}_final
+    # Infer case/receptor id from parent dir or PDB name.
     base_dir = os.path.dirname(combo_dir)
     case_pattern = None
-    if base_dir and '_' in base_dir:
-        parts = base_dir.split('_')
-        # Pattern valid_{TYPE}_final_{CASE}
-        if len(parts) >= 4 and parts[0] == 'valid' and parts[2] == 'final':
-            case_pattern = '_'.join(parts[3:]) if len(parts) > 3 else None
-    
-    # Else infer case from PDB name if present
-    if not case_pattern:
-        pdb_files = glob.glob(os.path.join(combo_dir, f"*_{prefix_type}.pdb"))
-        if pdb_files:
-            # First PDB basename → case tokens
-            pdb_name = os.path.basename(pdb_files[0])
-            parts = pdb_name.replace(f"_{prefix_type}.pdb", "").split('_')
-            if len(parts) >= 2:
-                potential_case = '_'.join(parts[:2])
-                # Verificar si hay una carpeta VS_GR con este caso
-                test_pattern = os.path.join(project_root, f"VS_GR_{potential_case.lower()}*")
-                if glob.glob(test_pattern):
-                    case_pattern = potential_case
-                elif len(parts) >= 3:
-                    potential_case = '_'.join(parts[:3])
-                    test_pattern = os.path.join(project_root, f"VS_GR_{potential_case.lower()}*")
-                    if glob.glob(test_pattern):
-                        case_pattern = potential_case
+    base_name = os.path.basename(base_dir)
+    dir_match = re.match(r'^valid_(?:GN|LF)_(.+)_final$', base_name, re.IGNORECASE)
+    if dir_match:
+        case_pattern = dir_match.group(1)
+
+    pdb_files = glob.glob(os.path.join(combo_dir, f"*_{prefix_type}.pdb"))
+    if pdb_files:
+        pdb_stem = os.path.basename(pdb_files[0]).replace(f"_{prefix_type}.pdb", "")
+        pdb_parts = pdb_stem.split('_')
+        if len(pdb_parts) >= 2:
+            # VS_GR folders use receptor id (e.g. 2b9h_A), not case id (2B9H_C).
+            case_pattern = '_'.join(pdb_parts[:2])
+        elif not case_pattern:
+            case_pattern = pdb_stem
     
     patterns = [
         os.path.join(project_root, f"VS_GR_*query_combination_{combo_number}_*"),
@@ -227,9 +217,21 @@ def check_topology_error_in_first_job(vs_folder):
                 pass
     if not text:
         return False, None
-    text_lower = text.lower()
     err_ref = os.path.join(os.path.basename(vs_folder), "jobs_out", "0-1.err")
     msg = f"Topology/GROMACS failure (see {err_ref})"
+
+    # If core MD artifacts exist, ignore post-processing helper failures.
+    if has_mmpbsa_required_inputs(vs_folder):
+        post_only_markers = (
+            "singularity: command not found",
+            "get_results.py",
+        )
+        text_lower = text.lower()
+        if any(marker in text_lower for marker in post_only_markers):
+            if "fatal error" not in text_lower:
+                return False, None
+
+    text_lower = text.lower()
     if any(x in text_lower for x in (
         "fatal error",
         "error in topology",

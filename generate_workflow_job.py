@@ -9,7 +9,7 @@ Layout: pipeline scripts under STELLAR/; launchers (run_propedia_commands_single
 run_md_simulations.py, sm.sh) at project root.
 
 Environment (optional overrides for #SBATCH):
-  SLURM_ACCOUNT, SLURM_QOS, SLURM_TIME, SLURM_PARTITION
+  SLURM_PARTITION, SLURM_QOS, SLURM_ACCOUNT, SLURM_GRES, SLURM_CPUS_PER_TASK, SLURM_TIME
 """
 
 import os
@@ -34,6 +34,28 @@ from generate_workflow_commands import (
 )
 
 ST = "STELLAR"
+
+
+def _slurm_directives() -> str:
+    """Optional #SBATCH lines from env (cluster-specific)."""
+    lines = []
+    partition = os.environ.get("SLURM_PARTITION", "").strip()
+    qos = os.environ.get("SLURM_QOS", "").strip()
+    account = os.environ.get("SLURM_ACCOUNT", "").strip()
+    gres = os.environ.get("SLURM_GRES", "").strip()
+    cpus = os.environ.get("SLURM_CPUS_PER_TASK", "").strip()
+
+    if partition:
+        lines.append(f"#SBATCH --partition={partition}")
+    if qos:
+        lines.append(f"#SBATCH --qos={qos}")
+    if account:
+        lines.append(f"#SBATCH -A {account}")
+    if gres:
+        lines.append(f"#SBATCH --gres={gres}")
+    if cpus:
+        lines.append(f"#SBATCH --cpus-per-task={cpus}")
+    return "\n".join(lines)
 
 
 def generate_workflow_job(
@@ -124,9 +146,8 @@ def generate_workflow_job(
     base_dir_rmsd_arg = f" --base-dir {case_upper}" if base_dir != "." else ""
     case_base = case_upper.split("_")[0] if "_" in case_upper else case_upper
 
-    account = os.environ.get("SLURM_ACCOUNT", "ucam37")
-    qos = os.environ.get("SLURM_QOS", "gp_resa")
     walltime = os.environ.get("SLURM_TIME", "3-00:00:00")
+    slurm_extra = _slurm_directives()
 
     start_val = int(start_from_step) if start_from_step is not None else 0
     g_mmpbsa = "./GROMACS/analyze_results/Simulation_gromacs/analyze_trajectory/extra/g_mmpbsa"
@@ -139,8 +160,7 @@ def generate_workflow_job(
 #SBATCH --cpus-per-task=1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --qos={qos}
-#SBATCH -A {account}
+{slurm_extra}
 #
 # Each step skips work if outputs already exist.
 # Resume from step N: START_FROM_STEP=10 sbatch this_script.sh  (skips steps 0–9)
@@ -383,8 +403,7 @@ date
 #SBATCH --cpus-per-task=1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --qos={qos}
-#SBATCH -A {account}
+{slurm_extra}
 
 set -e
 cd {proj}
