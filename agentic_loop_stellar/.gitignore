@@ -1,0 +1,35 @@
+# Agentic loop – ignore heavy / machine-specific / regenerable artifacts.
+# Keep only source (*.py, *.sh), docs (*.md, *.tex) and the final reports.
+
+# Python 3.11 venv for cursor-sdk + SDK/node bridge (machine-specific, ~340 MB)
+.venv-sdk/
+.sdkenv/
+bin/
+
+# Caches
+__pycache__/
+*.pyc
+
+# LaTeX build artifacts (keep .tex/.pdf/.md, drop the rest)
+*.aux
+*.log
+*.out.bak
+
+# Per-case run logs (regenerable, ~109 MB)
+logs/
+*.out
+*.err
+
+# Scratch
+work/
+e2e_summary.txt
+
+# Spanish docs / generated reports (kept local; English playbook is the committed one)
+CONTEXTO_FUTUROS_CASOS.md
+LOG_AGENTIC_LOOP_STELLAR.md
+INFORME_STELLAR.md
+COMMIT_SCRIPTS.md
+informe_stellar.tex
+informe_stellar.pdf
+tablaresultados.tex
+auto_fix_reports/
