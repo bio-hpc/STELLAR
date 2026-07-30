@@ -11,6 +11,7 @@ Pipeline scripts live under STELLAR/; launchers stay at project root (see README
 import glob
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional, Tuple
@@ -213,6 +214,56 @@ def find_receptor_pdb(case_name: str, base_dir: str = ".", frag_base_dir: Option
             return sorted(no_pr)[0]
         if pdb_files:
             return sorted(pdb_files)[0]
+
+    # Fallback: some cases only ship the receptor as .pdbqt in best_scores (no
+    # .pdb). receptor_original.pdb is the same receptor structure used for docking
+    # (identical atoms/coords), and is staged into the case root, so use it.
+    #
+    # IMPORTANT: do NOT return receptor_original.pdb as-is. Its basename becomes the
+    # receptor id in the VS_GR_<receptor>_... MD folder names, and downstream that id
+    # is how folders are matched per case:
+    #   - run_md_simulations.py --check-existing globs VS_GR_*query_combination_N and
+    #     filters by case id; "receptor_original" contains no case id, so it matches
+    #     unrelated cases' folders and wrongly skips MD.
+    #   - calculate_md_rmsd.py discovers runs via "VS_GR_*<case>*"; "receptor_original"
+    #     hides the folders from the case filter -> "0 runs" and NA rmsd_md.
+    # So we expose the same coordinates under the real receptor basename taken from the
+    # docking .pdbqt (e.g. 4p3w_A.pdbqt -> 4p3w_A.pdb), keeping folder naming per-case
+    # and collision-free.
+    for d in (frag_base_dir, base_dir):
+        if not d:
+            continue
+        cand = os.path.join(d, "receptor_original.pdb")
+        if not os.path.isfile(cand):
+            continue
+        rec_base = None
+        search_root = frag_base_dir if (frag_base_dir and frag_base_dir != ".") else base_dir
+        for prefix in ("VS_GN", "VS_LF"):
+            qt = [
+                f
+                for f in glob.glob(
+                    os.path.join(
+                        search_root,
+                        f"{prefix}_{case_upper}_Frag*",
+                        "results",
+                        "best_scores",
+                        f"{pdb_code}_*.pdbqt",
+                    )
+                )
+                if os.path.isfile(f)
+            ]
+            if qt:
+                rec_base = os.path.splitext(os.path.basename(sorted(qt)[0]))[0]
+                break
+        if rec_base is None:
+            rec_base = f"{pdb_code}_receptor"
+        dest = os.path.join(d, f"{rec_base}.pdb")
+        if not os.path.isfile(dest):
+            try:
+                shutil.copyfile(os.path.realpath(cand), dest)
+            except OSError:
+                return cand  # last resort: keep original behaviour
+        return dest
     return None
 
 

@@ -20,6 +20,51 @@ import argparse
 from pathlib import Path
 
 
+def find_case_vs_folders(case_name):
+    """VS_GR_* (MD) folders that belong to this case.
+
+    VS_GR folders are named by the RECEPTOR id (VS_GR_<pdbid>_<recchain>_...), not by
+    the case's peptide chain, so a case-name glob (e.g. VS_GR_*4P3W_G*) never matches
+    and the folders pile up at the project root. Identify them precisely from the
+    vs_folder column of resultados_rmsd_md_<CASE>.csv (the exact runs this case used);
+    fall back to a pdbid glob, which mirrors how calculate_md_rmsd selects runs for a
+    case. Note: cases that share a pdbid+peptide (e.g. 6G0Y_I/6G0Y_J) share the same
+    VS_GR folders on disk; the first case to organize moves them and the rest skip.
+    """
+    case_upper = case_name.upper()
+    case_lower = case_name.lower()
+    pdbid = case_upper.split("_")[0]
+    found = []
+
+    for csvname in (f"resultados_rmsd_md_{case_upper}.csv",
+                    f"resultados_rmsd_md_{case_lower}.csv"):
+        if not os.path.isfile(csvname):
+            continue
+        try:
+            with open(csvname) as fh:
+                header = fh.readline().rstrip("\n").split(",")
+                idx = header.index("vs_folder") if "vs_folder" in header else None
+                if idx is not None:
+                    for line in fh:
+                        cols = line.rstrip("\n").split(",")
+                        if len(cols) > idx:
+                            d = cols[idx].strip()
+                            if d and os.path.isdir(d) and d not in found:
+                                found.append(d)
+        except OSError:
+            pass
+        break
+
+    if found:
+        return found
+
+    for pat in (f"VS_GR_{pdbid}_*", f"VS_GR_{pdbid.lower()}_*"):
+        for d in glob.glob(pat):
+            if os.path.isdir(d) and d not in found:
+                found.append(d)
+    return found
+
+
 def find_and_move_files(case_name, target_dir, dry_run=False):
     """
     Encuentra y mueve todos los archivos relacionados con el caso.
@@ -78,15 +123,12 @@ def find_and_move_files(case_name, target_dir, dry_run=False):
         f"{case_lower}_GN",
     ])
     
-    # 5. Carpetas VS_GR_* del caso (simulaciones MD)
-    # Buscar con diferentes variaciones del nombre del caso
-    patterns_to_move.extend([
-        f"VS_GR_{case_upper}_*",
-        f"VS_GR_{case_lower}_*",
-        f"VS_GR_*{case_upper}*",
-        f"VS_GR_*{case_lower}*",
-    ])
-    
+    # 5. Carpetas VS_GR_* del caso (simulaciones MD): se mueven aparte, a una
+    #    subcarpeta md_simulations/, y se identifican por sus nombres reales (no por
+    #    el nombre del caso), porque VS_GR_* se nombra por el RECEPTOR
+    #    (VS_GR_<pdbid>_<recchain>_...), no por la cadena de péptido del caso. Ver
+    #    find_case_vs_folders() y la sección de movido más abajo.
+
     # 6. Archivos CSV relacionados (incluye nombres por caso para ejecución paralela)
     csv_patterns = [
         f"valid_fragment_combinations_GN_no_overlap.csv",
@@ -141,14 +183,25 @@ def find_and_move_files(case_name, target_dir, dry_run=False):
     for pattern in csv_patterns:
         if os.path.exists(pattern) and os.path.isfile(pattern):
             csv_files_found.append(pattern)
-    
+
+    # Carpetas de simulación MD (VS_GR_*): identificarlas AHORA, antes de mover el
+    # resultados_rmsd_md_<CASE>.csv del que dependemos para nombrarlas con precisión.
+    print("Buscando carpetas de simulación MD (VS_GR_*)...")
+    vs_folders_found = find_case_vs_folders(case_name)
+
     # Mostrar lo que se va a mover
     print(f"\nCarpetas encontradas: {len(folders_found)}")
     for folder in sorted(folders_found):
         size = get_dir_size(folder)
         stats['total_size'] += size
         print(f"  - {folder} ({format_size(size)})")
-    
+
+    print(f"\nCarpetas VS_GR_* (MD) encontradas: {len(vs_folders_found)}")
+    for folder in sorted(vs_folders_found):
+        size = get_dir_size(folder)
+        stats['total_size'] += size
+        print(f"  - {folder} ({format_size(size)}) -> {target_dir}/md_simulations/")
+
     print(f"\nArchivos CSV encontrados: {len(csv_files_found)}")
     for csv_file in sorted(csv_files_found):
         size = os.path.getsize(csv_file)
@@ -189,7 +242,29 @@ def find_and_move_files(case_name, target_dir, dry_run=False):
                 stats['files_moved'] += 1
         except Exception as e:
             print(f"  ✗ Error moviendo {csv_file}: {e}")
-    
+
+    # Mover carpetas de simulación MD (VS_GR_*) a la subcarpeta md_simulations/.
+    # Mantiene la raíz del proyecto despejada y agrupa todo el caso en <CASE>_results/.
+    # calculate_md_rmsd.find_vs_folders() también busca aquí, así que recomputar el
+    # paso 13 tras organizar sigue encontrando las simulaciones.
+    if vs_folders_found:
+        md_dest_dir = os.path.join(target_dir, "md_simulations")
+        os.makedirs(md_dest_dir, exist_ok=True)
+        print(f"\nMoviendo {len(vs_folders_found)} carpetas VS_GR_* a {md_dest_dir}...")
+        for folder in sorted(vs_folders_found):
+            try:
+                dest = os.path.join(md_dest_dir, os.path.basename(folder))
+                if os.path.exists(dest):
+                    print(f"  ⚠ {folder} -> Ya existe en destino, omitiendo")
+                elif not os.path.isdir(folder):
+                    print(f"  ⚠ {folder} -> ya no existe (movido por otro caso), omitiendo")
+                else:
+                    shutil.move(folder, dest)
+                    print(f"  ✓ {folder} -> {dest}")
+                    stats['folders_moved'] += 1
+            except Exception as e:
+                print(f"  ✗ Error moviendo {folder}: {e}")
+
     return stats
 
 

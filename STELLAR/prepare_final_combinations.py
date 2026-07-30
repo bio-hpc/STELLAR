@@ -122,7 +122,29 @@ def resolve_pdb_file(pdb_file, pdb_search_dirs=None):
     found = find_pdb_file(base, all_dirs if all_dirs else None)
     if found:
         return (os.path.abspath(found), os.path.basename(found))
-    
+
+    # 5) Last-resort fallback: receptor_original.pdb from the case staging root.
+    #    Some cases only provide the receptor as a .pdbqt in best_scores (no .pdb);
+    #    receptor_original.pdb is the same receptor structure, so it is a safe source.
+    #    Walk up from each --pdb-search-dir (case-specific) to reach the staging root.
+    checked = set()
+    for d in pdb_search_dirs:
+        p = os.path.abspath(d)
+        for _ in range(6):
+            if p in checked:
+                break
+            checked.add(p)
+            cand = os.path.join(p, "receptor_original.pdb")
+            if os.path.isfile(cand):
+                return (os.path.abspath(cand), os.path.basename(cand))
+            parent = os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
+    cand = os.path.abspath("receptor_original.pdb")
+    if os.path.isfile(cand):
+        return (cand, os.path.basename(cand))
+
     return (None, None)
 
 

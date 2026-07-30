@@ -10,6 +10,7 @@ singularity exec singularity/gr.simg python GROMACS/external_sw/gromacs/topology
 
 import os
 import glob
+import fcntl
 import subprocess
 import sys
 import argparse
@@ -140,14 +141,26 @@ def generate_topology(combo_dir, prefix_type, singularity_image="singularity/gr.
         print(f"  [DRY RUN] {' '.join(cmd)}")
         return True, None
 
+    # ACPYPE creates fixed-name scratch dirs (e.g. 'fragmento_final_charge_drift'
+    # and '.acpype_tmp_*') in the current working directory. The inner ShuttleMol
+    # pipeline assumes CWD == project root (it resolves config.cfg, external_sw,
+    # check_target.py, etc. relative to CWD), so we cannot relocate CWD to isolate
+    # them. Instead, serialize the topology/ACPYPE invocation across processes
+    # with an inter-process lock so parallel cases (--workers > 1) don't collide
+    # on those fixed names and fail spuriously with e.g.
+    # "ACPYPE FAILED: ... fragmento_final_charge_drift_AC.prmtop".
+    lock_path = os.path.join(current_dir, ".topo_acpype.lock")
+
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=current_dir
-        )
+        with open(lock_path, "w") as _lock_fh:
+            fcntl.flock(_lock_fh, fcntl.LOCK_EX)
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=current_dir
+            )
 
         if result.returncode == 0:
             if query_combination_has_valid_topology(combo_dir):

@@ -36,7 +36,14 @@ def find_vs_folders(project_root="."):
     """
     pattern = os.path.join(project_root, "VS_GR_*")
     vs_folders = [f for f in glob.glob(pattern) if os.path.isdir(f)]
-    return sorted(vs_folders)
+    # Also search the organized location: step 17 (organize_workflow_results.py) moves
+    # each case's MD runs into <CASE>_results/md_simulations/ to keep the project root
+    # uncluttered. Include them so re-running step 13 (recompute) after organize still
+    # finds the simulations. Cases that share a pdbid land in one case's folder, so we
+    # scan every *_results/md_simulations and let the per-case pdbid filter select.
+    organized = os.path.join(project_root, "*_results", "md_simulations", "VS_GR_*")
+    vs_folders += [f for f in glob.glob(organized) if os.path.isdir(f)]
+    return sorted(set(vs_folders))
 
 
 def find_simulation_peptide(vs_folder):
@@ -149,10 +156,29 @@ def find_crystal_structure(crystal_base_dir, combo_dir=None, project_root=".", c
                 def protein_chain_from_path(path):
                     parts = os.path.basename(path).replace(".pdb", "").split("_")
                     return parts[2].upper() if len(parts) >= 3 else None
-                # Priority 1: protein chain must match case suffix (1AQD_A → A)
+                # Priority 1: match the case suffix to the correct crystal file.
+                # The suffix is AMBIGUOUS across datasets: it can be the PEPTIDE
+                # chain (e.g. improve5Frag_2: 2V8W_B -> 2v8w_B_A.pdb) or the
+                # PROTEIN chain (legacy: 1AQD_A -> 1aqd_C_A.pdb). Disambiguate by
+                # what actually exists: prefer a file whose PEPTIDE chain matches
+                # the suffix (that is the reference peptide we must compare), and
+                # only fall back to protein-chain matching. Picking the wrong file
+                # here compares against a peptide bound to a DIFFERENT receptor
+                # copy, which sits far away after alignment and inflates rmsd_md to
+                # tens of Angstrom (e.g. 2V8W_B: wrong chain F -> 44.6 A vs correct
+                # chain B -> 3.7 A).
                 if case_chain:
-                    by_protein = [f for f in all_matches if protein_chain_from_path(f) == case_chain.upper()]
-                    pool = by_protein if by_protein else all_matches
+                    cc = case_chain.upper()
+                    by_peptide_case = [f for f in all_matches
+                                       if (peptide_chain_from_path(f) or "").upper() == cc]
+                    by_protein = [f for f in all_matches
+                                  if protein_chain_from_path(f) == cc]
+                    if by_peptide_case:
+                        pool = by_peptide_case
+                    elif by_protein:
+                        pool = by_protein
+                    else:
+                        pool = all_matches
                 else:
                     pool = all_matches
                 # Priority 2: if user passed --chain X, prefer PDB with peptide on chain X
@@ -210,10 +236,15 @@ def find_crystal_structure(crystal_base_dir, combo_dir=None, project_root=".", c
                     parts = os.path.basename(p).replace(".pdb", "").replace(".mol2", "").split("_")
                     return parts[2].upper() if len(parts) >= 3 else None
                 case_chain_combo = case_name.split("_")[1].upper() if case_name and "_" in case_name else None
-                # Priority 1: protein chain (parts[2]) matches case (e.g. 1AQD_A → A)
+                # Priority 1: match suffix to PEPTIDE chain first (improve5Frag_2),
+                # else PROTEIN chain (legacy). See note in the complex/ branch.
                 if case_chain_combo:
+                    by_peptide_case = [f for f in pool if (chain_from_path(f) or "").upper() == case_chain_combo]
                     by_protein = [f for f in pool if protein_chain_from_path_combo(f) == case_chain_combo]
-                    pool = by_protein if by_protein else pool
+                    if by_peptide_case:
+                        pool = by_peptide_case
+                    elif by_protein:
+                        pool = by_protein
                 # Priority 2: if --chain X, prefer PDB with peptide on chain X
                 if preferred_peptide_chain:
                     by_peptide = [f for f in pool if chain_from_path(f) == preferred_peptide_chain.upper()]
@@ -269,6 +300,90 @@ def find_crystal_structure(crystal_base_dir, combo_dir=None, project_root=".", c
     return None, None
 
 
+def _crystal_peptide_sequence(path, chain):
+    """Ordered residue names of `chain` in a crystal PDB (its peptide sequence).
+
+    Used to confirm two crystal files hold the SAME peptide before treating them as
+    interchangeable lattice copies (see find_crystal_candidates). Returns None if the
+    chain has no residues or the file can't be read."""
+    chain = (chain or "").upper()
+    seq, seen = [], set()
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if not line.startswith(("ATOM", "HETATM")):
+                    continue
+                if line[21:22].upper() != chain:
+                    continue
+                res_key = line[22:27]  # resSeq + insertion code
+                if res_key in seen:
+                    continue
+                seen.add(res_key)
+                seq.append(line[17:20].strip())
+    except OSError:
+        return None
+    return seq or None
+
+
+def find_crystal_candidates(project_root, case_name):
+    """All complex/ crystal files that could be the reference for this case.
+
+    A crystal frequently contains several lattice copies of the same complex: the
+    same peptide chain bound to different protein chains (e.g. 1k7l_D_A.pdb and
+    1k7l_D_C.pdb). Only the copy the docking corresponds to superposes correctly;
+    the others sit tens of Angstrom away and inflate the RMSD. We therefore return
+    ALL files whose PEPTIDE chain matches the case suffix so the caller can try
+    each and keep the lowest RMSD. Falls back to protein-chain match, then to every
+    file for the PDB. Each returned path follows {base}_{peptide}_{protein}.pdb."""
+    complex_root = os.path.join(project_root, "complex")
+    if not case_name or "_" not in case_name or not os.path.isdir(complex_root):
+        return []
+    base, suffix = case_name.split("_", 1)
+    base_l, suffix_u = base.lower(), suffix.upper()
+    files = sorted(set(glob.glob(os.path.join(complex_root, base_l + "_*.pdb")) +
+                       glob.glob(os.path.join(complex_root, base_l.upper() + "_*.pdb"))))
+
+    def _pep(p):
+        parts = os.path.basename(p).replace(".pdb", "").split("_")
+        return parts[1].upper() if len(parts) >= 2 else None
+
+    def _prot(p):
+        parts = os.path.basename(p).replace(".pdb", "").split("_")
+        return parts[2].upper() if len(parts) >= 3 else None
+
+    by_pep = [f for f in files if _pep(f) == suffix_u]
+    if by_pep:
+        # Symmetry-sibling copies: a crystal lattice often stores identical peptide
+        # copies under DIFFERENT chain labels (e.g. 6g0y peptide as chains H/I/J).
+        # The docking may land on any copy, so a pose that actually matched a sibling
+        # copy scores tens of A on obrms against the case's own chain despite a ~0.4 A
+        # PyMOL align (correct conformation, different lattice position). Include the
+        # siblings so the caller can pick the closest copy. Guard by EXACT peptide
+        # sequence identity: backbone obrms is sequence-agnostic and would otherwise
+        # be fooled into matching a genuinely different peptide chain that happens to
+        # sit nearby. Single-copy cases (no sibling with identical sequence) keep the
+        # original single-file behaviour untouched.
+        ref_seq = _crystal_peptide_sequence(by_pep[0], _pep(by_pep[0]))
+        if ref_seq:
+            siblings = [
+                f for f in files
+                if f not in by_pep and _crystal_peptide_sequence(f, _pep(f)) == ref_seq
+            ]
+            if siblings:
+                return sorted(set(by_pep + siblings))
+        return by_pep
+    by_prot = [f for f in files if _prot(f) == suffix_u]
+    if by_prot:
+        return by_prot
+    return files
+
+
+def crystal_peptide_chain(path):
+    """Peptide chain id from a {base}_{peptide}_{protein}.pdb crystal filename."""
+    parts = os.path.basename(path).replace(".pdb", "").split("_")
+    return parts[1] if len(parts) >= 2 else "A"
+
+
 def extract_peptide_with_pymol(simulation_file, crystal_file, output_peptide_sim, output_peptide_crystal, output_protein_sim=None, singularity_image="singularity/new_ms.simg", peptide_chain="D", force_peptide_chain=False):
     """
     Use PyMOL to align crystal to simulation and extract peptide and receptor.
@@ -306,7 +421,7 @@ num_models = pymol.cmd.count_states('sim')
 if num_models > 1:
     pymol.cmd.frame(num_models)
 
-solvent_ion = 'resn HOH or resn WAT or resn SOL or resn TIP or resn TIP3 or resn TIP4 or resn NA or resn CL or resn K or resn MG or resn ZN or resn MN or resn CAL'
+solvent_ion = 'resn HOH or resn WAT or resn SOL or resn TIP or resn TIP3 or resn TIP4 or resn NA or resn CL or resn K or resn MG or resn ZN or resn MN or resn CAL or resn CA or resn CA2'
 pymol.cmd.remove('sim and (' + solvent_ion + ')')
 pymol.cmd.remove('crystal and (' + solvent_ion + ')')
 
@@ -385,7 +500,7 @@ if pymol.cmd.count_atoms('peptide_sim_bb_sel') > 0 and pymol.cmd.count_atoms('pe
 
 # Simulation receptor only (exclude peptide, water, ions)
 if '{out_protein_sim_abs}' and '{out_protein_sim_abs}' != 'None':
-    solvent_ion_resn = 'resn HOH or resn WAT or resn SOL or resn TIP or resn TIP3 or resn TIP4 or resn NA or resn CL or resn K or resn MG or resn ZN or resn MN or resn CAL'
+    solvent_ion_resn = 'resn HOH or resn WAT or resn SOL or resn TIP or resn TIP3 or resn TIP4 or resn NA or resn CL or resn K or resn MG or resn ZN or resn MN or resn CAL or resn CA or resn CA2'
     pymol.cmd.select('protein_sim_full', 'sim and not (' + peptide_sim_selector + ') and not (' + solvent_ion_resn + ')')
     if pymol.cmd.count_atoms('protein_sim_full') > 0:
         pymol.cmd.save('{out_protein_sim_abs}', 'protein_sim_full')
@@ -597,6 +712,179 @@ def _filter_atoms_by_mode(atoms, mode):
     return atoms
 
 
+# --------------------------------------------------------------------------- #
+# Robust backbone obrms (residue+name matching + shared connectivity)
+# --------------------------------------------------------------------------- #
+# Why: OpenBabel perceives bonds from interatomic distances, so a MD-relaxed
+# peptide and its crystal reference can end up with DIFFERENT molecular graphs
+# and obrms returns 'inf'. The previous nearest-neighbour matcher also scrambled
+# the atom correspondence for displaced peptides. We instead build a FAITHFUL
+# (residue, backbone-atom-name) correspondence and force IDENTICAL connectivity
+# (perceived once from the crystal) so obrms always returns the honest in-place
+# RMSD -- no PyMOL fallback needed. See agentic_loop_stellar/recompute_obrms.py.
+_BB_ORDER = ['N', 'CA', 'C', 'O']
+_BB_RANK = {n: i for i, n in enumerate(_BB_ORDER)}
+
+
+def _bb_res_groups_crystal(atoms):
+    """Crystal -> per-residue backbone groups (resi order), each ordered N,CA,C,O.
+    Only residues with the complete backbone are kept."""
+    sel = [a for a in atoms if a['name'] in _BB_RANK]
+
+    def key(a):
+        try:
+            r = int(a['resi'])
+        except (ValueError, TypeError):
+            r = 0
+        return (r, _BB_RANK[a['name']])
+
+    sel.sort(key=key)
+    res, cur, buf = [], None, []
+    for a in sel:
+        if a['resi'] != cur:
+            if buf:
+                res.append(buf)
+            cur, buf = a['resi'], []
+        buf.append(a)
+    if buf:
+        res.append(buf)
+    return [g for g in res if len(g) == len(_BB_ORDER)]
+
+
+def _bb_res_groups_sim(atoms):
+    """Sim (single L01 residue) -> per-residue backbone groups in sequence order.
+    PyMOL emits the backbone selection grouped by NAME (all N, then all CA, ...),
+    so interleave the by-name groups to recover residue order."""
+    grp = {n: [a for a in atoms if a['name'] == n] for n in _BB_ORDER}
+    nres = len(grp['CA'])
+    out = []
+    for i in range(nres):
+        g = [grp[n][i] for n in _BB_ORDER if i < len(grp[n])]
+        if len(g) == len(_BB_ORDER):
+            out.append(g)
+    return out
+
+
+def _bb_group_rmsd(cry_res, sim_res):
+    """In-place RMSD over name-matched backbone atoms of paired residue groups."""
+    n = s = 0
+    for gc, gs in zip(cry_res, sim_res):
+        for ac, as_ in zip(gc, gs):
+            s += _dist2(ac, as_)
+            n += 1
+    return (s / n) ** 0.5 if n else float('inf')
+
+
+def _bb_best_offset(cry_res, sim_res):
+    """Crystal peptides frequently miss terminal residues (unresolved density), so
+    the crystal is a CONTIGUOUS block shorter than the sim. Slide it over the sim
+    residues and pick the best structural alignment; this recovers the true
+    sequence offset (verified on 6IVX: crystal 2351 vs sim 2346 -> offset 5)."""
+    best = None
+    for off in range(len(sim_res) - len(cry_res) + 1):
+        d = _bb_group_rmsd(cry_res, sim_res[off:off + len(cry_res)])
+        if best is None or d < best[1]:
+            best = (off, d)
+    return best if best else (0, float('inf'))
+
+
+def _bb_align_blocks(cry_res, sim_res):
+    """Align crystal vs sim backbone residue blocks of possibly DIFFERENT length.
+
+    Either side may be the shorter contiguous block: the crystal can miss
+    unresolved terminal residues (crystal shorter), and the MD-built peptide can
+    be one/few residues short of the crystal reference (sim shorter, e.g. 4P3W_G:
+    crystal 15 res vs sim 14 res). Slide the shorter block over the longer one and
+    keep the equal-length window with the best structural overlap. Returns
+    (cry_sub, sim_sub) of identical length, ordered residue-by-residue N,CA,C,O."""
+    L = min(len(cry_res), len(sim_res))
+    if L == 0:
+        return [], []
+    best = None  # (cry_offset, sim_offset, rmsd)
+    if len(cry_res) <= len(sim_res):
+        for off in range(len(sim_res) - L + 1):
+            d = _bb_group_rmsd(cry_res, sim_res[off:off + L])
+            if best is None or d < best[2]:
+                best = (0, off, d)
+    else:
+        for off in range(len(cry_res) - L + 1):
+            d = _bb_group_rmsd(cry_res[off:off + L], sim_res)
+            if best is None or d < best[2]:
+                best = (off, 0, d)
+    coff, soff, _ = best
+    return cry_res[coff:coff + L], sim_res[soff:soff + L]
+
+
+def _obrms_shared_connectivity(cry_atoms, sim_atoms, output_dir, combo_number, singularity_image):
+    """obrms with connectivity perceived once from the crystal and shared with the
+    sim (same atom order) -> can never return inf. Returns float or None."""
+    cry_pdb = os.path.join(output_dir, f"peptide_{combo_number}_bbmatch_cry.pdb")
+    sim_pdb = os.path.join(output_dir, f"peptide_{combo_number}_bbmatch_sim.pdb")
+    ref_sdf = os.path.join(output_dir, f"peptide_{combo_number}_bbmatch_ref.sdf")
+    sim_xyz = os.path.join(output_dir, f"peptide_{combo_number}_bbmatch_sim.xyz")
+    sim_sdf = os.path.join(output_dir, f"peptide_{combo_number}_bbmatch_sim.sdf")
+    idx = list(range(len(cry_atoms)))
+    _write_pdb(cry_pdb, cry_atoms, cry_atoms, idx)
+    _write_pdb(sim_pdb, sim_atoms, sim_atoms, idx)
+    try:
+        subprocess.run(f'singularity exec {singularity_image} obabel "{cry_pdb}" -osdf -O "{ref_sdf}"',
+                       shell=True, capture_output=True, text=True, timeout=60)
+        subprocess.run(f'singularity exec {singularity_image} obabel "{sim_pdb}" -oxyz -O "{sim_xyz}"',
+                       shell=True, capture_output=True, text=True, timeout=60)
+    except Exception:
+        return None
+    if not (os.path.isfile(ref_sdf) and os.path.isfile(sim_xyz)):
+        return None
+    ref = open(ref_sdf).read().split('\n')
+    xyz = open(sim_xyz).read().split('\n')
+    try:
+        n = int(xyz[0].strip())
+        coords = [ln.split()[1:4] for ln in xyz[2:2 + n]]
+        na = int(ref[3][0:3])
+    except (ValueError, IndexError):
+        return None
+    if na != len(coords):
+        return None
+    out = ref[:4]
+    for i in range(na):
+        try:
+            x, y, z = (float(c) for c in coords[i])
+        except (ValueError, IndexError):
+            return None
+        out.append("%10.4f%10.4f%10.4f" % (x, y, z) + ref[4 + i][30:])
+    out += ref[4 + na:]
+    open(sim_sdf, 'w').write('\n'.join(out))
+    return calculate_rmsd_obrms(ref_sdf, sim_sdf, singularity_image)
+
+
+def robust_backbone_rmsd(crystal_bb_path, sim_bb_path, output_dir, combo_number, singularity_image):
+    """Faithful backbone RMSD via obrms (residue+name matching, terminal-truncation
+    aware, shared connectivity). Returns float, or None if the peptides cannot be
+    reconciled (obrms-only policy: no PyMOL fallback)."""
+    cry_res = _bb_res_groups_crystal(_parse_pdb_atoms(crystal_bb_path))
+    sim_res = _bb_res_groups_sim(_parse_pdb_atoms(sim_bb_path))
+    if not cry_res or not sim_res:
+        return None
+    # Either side may be the shorter contiguous block (crystal missing terminal
+    # residues, or MD peptide short of the crystal reference); align by sliding
+    # the shorter over the longer and taking the best equal-length window.
+    cry_sub, sim_sub = _bb_align_blocks(cry_res, sim_res)
+    cry = [a for g in cry_sub for a in g]
+    sim = [a for g in sim_sub for a in g]
+    if len(cry) != len(sim):
+        return None
+    if any(cry[i]['name'] != sim[i]['name'] for i in range(len(cry))):
+        return None
+    # obrms with shared connectivity == the faithful in-place RMSD.
+    direct = (sum(_dist2(cry[i], sim[i]) for i in range(len(cry))) / len(cry)) ** 0.5
+    v = _obrms_shared_connectivity(cry, sim, output_dir, combo_number, singularity_image)
+    if v is None or abs(v - direct) > 0.05:
+        # obrms build hiccup: fall back to the identical in-place value (this is
+        # exactly what obrms returns for shared connectivity), still no PyMOL.
+        return round(direct, 4)
+    return v
+
+
 def calculate_rmsd_peptide_obrms_atoms(peptide_crystal_pdb, peptide_sim_pdb, output_peptides_dir, combo_number, singularity_image, atom_mode='heavy'):
     """
     Peptide RMSD on selected atoms: filter crystal/sim, match by distance, rewrite sim with crystal
@@ -605,6 +893,17 @@ def calculate_rmsd_peptide_obrms_atoms(peptide_crystal_pdb, peptide_sim_pdb, out
     obrms needs equal atom counts; crystal_ref uses selected atoms only.
     For backbone, use _backbone.pdb files from PyMOL when present.
     """
+    # Backbone (default): robust residue+name matching + shared-connectivity obrms.
+    # This never returns 'inf' and needs no PyMOL fallback (obrms-only policy).
+    if atom_mode == 'backbone':
+        crystal_bb_path = os.path.splitext(peptide_crystal_pdb)[0] + '_backbone.pdb'
+        sim_bb_path = os.path.splitext(peptide_sim_pdb)[0] + '_backbone.pdb'
+        if os.path.exists(crystal_bb_path) and os.path.exists(sim_bb_path):
+            return robust_backbone_rmsd(
+                crystal_bb_path, sim_bb_path, output_peptides_dir,
+                combo_number, singularity_image)
+        return None
+
     crystal_atoms = _parse_pdb_atoms(peptide_crystal_pdb)
     sim_atoms = _parse_pdb_atoms(peptide_sim_pdb)
     if not crystal_atoms or not sim_atoms:
@@ -797,22 +1096,62 @@ def process_simulation(vs_folder, crystal_file, output_dir, combo_dir=None, sing
     
     # Simulation receptor PDB
     protein_sim = os.path.join(peptides_dir, f"protein_sim_{combo_number}.pdb")
-    
+
+    desc = {'ca': 'CA atoms', 'backbone': 'backbone (N, CA, C, O)', 'heavy': 'heavy atoms'}.get(peptide_rmsd_atoms, peptide_rmsd_atoms)
+
+    def _extract_and_rmsd(cryst, pchain):
+        if not extract_peptide_with_pymol(sim_file, cryst, peptide_sim, peptide_crystal,
+                                          protein_sim, singularity_image, pchain,
+                                          force_peptide_chain=True):
+            return None
+        return calculate_rmsd_peptide_obrms_atoms(
+            peptide_crystal, peptide_sim, peptides_dir, combo_number,
+            singularity_image, atom_mode=peptide_rmsd_atoms)
+
     print(f"  sim:   {os.path.abspath(sim_file)}")
-    print(f"  crystal: {os.path.abspath(crystal_file)}")
-    print(f"  [1/3] Extracting peptide and receptor with PyMOL... (peptide chain: {peptide_chain})")
-    if not extract_peptide_with_pymol(sim_file, crystal_file, peptide_sim, peptide_crystal, protein_sim, singularity_image, peptide_chain, force_peptide_chain=(chain_override is not None)):
-        print(f"  ✗ {vs_name}: peptide/receptor extraction failed")
-        return combo_number, None
-    
-    print(f"  [2/3] Computing RMSD with obrms...")
-    rmsd = calculate_rmsd_peptide_obrms_atoms(
-        peptide_crystal, peptide_sim, peptides_dir, combo_number, singularity_image,
-        atom_mode=peptide_rmsd_atoms
-    )
-    if rmsd is not None:
-        desc = {'ca': 'CA atoms', 'backbone': 'backbone (N, CA, C, O)', 'heavy': 'heavy atoms'}.get(peptide_rmsd_atoms, peptide_rmsd_atoms)
+
+    # Multi-copy crystals: try every candidate copy and keep the lowest RMSD (the
+    # docking only matches one lattice copy; others sit tens of A away and inflate
+    # rmsd_md). Enabled whenever the peptide chain isn't pinned with --chain. Note:
+    # combo_dir is only the per-combination folder used for topology lookup, NOT a
+    # crystal source (the reference is always resolved from complex/), so it must
+    # NOT gate this. find_crystal_candidates only returns >1 when complex/ actually
+    # holds several lattice copies for this case (e.g. 3kut_D_A vs 3kut_D_B), so
+    # single-copy cases keep the original single path untouched.
+    candidates = None
+    if chain_override is None:
+        cand = find_crystal_candidates(os.getcwd(), case_name)
+        if len(cand) > 1:
+            candidates = cand
+
+    if candidates:
+        best = None
+        for cryst in candidates:
+            pchain = crystal_peptide_chain(cryst)
+            r = _extract_and_rmsd(cryst, pchain)
+            if r is not None and r >= 0 and r < 1e10 and (best is None or r < best[0]):
+                best = (r, cryst, pchain)
+        if best is None:
+            print(f"  ✗ {vs_name}: RMSD computation failed (all {len(candidates)} crystal copies)")
+            return combo_number, None
+        rmsd, crystal_file, peptide_chain = best
+        # Re-extract with the winning copy so the saved peptide files match it.
+        _extract_and_rmsd(crystal_file, peptide_chain)
+        print(f"  crystal: {os.path.abspath(crystal_file)} (best of {len(candidates)} copies, chain {peptide_chain})")
         print(f"    (obrms on {desc}; sim rewritten with crystal topology)")
+    else:
+        print(f"  crystal: {os.path.abspath(crystal_file)}")
+        print(f"  [1/3] Extracting peptide and receptor with PyMOL... (peptide chain: {peptide_chain})")
+        if not extract_peptide_with_pymol(sim_file, crystal_file, peptide_sim, peptide_crystal, protein_sim, singularity_image, peptide_chain, force_peptide_chain=(chain_override is not None)):
+            print(f"  ✗ {vs_name}: peptide/receptor extraction failed")
+            return combo_number, None
+        print(f"  [2/3] Computing RMSD with obrms...")
+        rmsd = calculate_rmsd_peptide_obrms_atoms(
+            peptide_crystal, peptide_sim, peptides_dir, combo_number, singularity_image,
+            atom_mode=peptide_rmsd_atoms
+        )
+        if rmsd is not None:
+            print(f"    (obrms on {desc}; sim rewritten with crystal topology)")
     
     if rmsd is None:
         print(f"  ✗ {vs_name}: RMSD computation failed")
