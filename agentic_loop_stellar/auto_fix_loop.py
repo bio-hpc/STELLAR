@@ -21,7 +21,7 @@ considered and applied, under auto_fix_reports/RUN_<timestamp>/.
 
 Usage
 -----
-  export CURSOR_API_KEY="crsr_3d186d74a388231f971e4d6787637efa2059c0f9d93472f54a2e3abcb5e99441"
+  export CURSOR_API_KEY="crsr_..."   # your Cursor API key (never commit the real value)
   pip install cursor-sdk                       # into the 3.9 shim's interpreter
   agentic_loop_stellar/bin/python3 agentic_loop_stellar/auto_fix_loop.py \
       --workers 3 --max-fix-attempts 1 CASE1 CASE2 ...
